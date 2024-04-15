@@ -156,4 +156,6 @@ void setup() {
 void loop() {
   // Do nothing. Everything is done in another task by the web server
   delay(10000);
+
+  // curl -o captured_photo.jpg "http://172.16.1.175/capture"
 }
