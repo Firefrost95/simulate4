@@ -1,12 +1,13 @@
-/**********************************************************************
-  Filename    : Camera Web Server with Ultrasonic Sensor
-  Description : The camera images captured by the ESP32S3 are displayed on the web page. 
-                Additionally, an ultrasonic sensor triggers a ping when the measured distance matches the initial distance.
-  Auther      : www.freenove.com
-  Modification: 2022/10/31
-**********************************************************************/
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <base64.h>
+
+const int trigPin = 7;   // Trigger Pin of Ultrasonic Sensor
+const int echoPin = 21;  // Echo Pin of Ultrasonic Sensor
+long initialDistance = -1;  // Variable to store the first measured distance
+// Define your Google Apps Script endpoint URL
+const char* scriptURL = "https://script.google.com/macros/s/AKfycbzTW6LPc59BaGms6Vi9uFcm0uL2CY_IG5duj4nf_6-2vEoGD9DG4F3BF4DIPVzV8ea9/exec";
 
 // ===================
 // Select camera model
@@ -31,23 +32,22 @@
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-//const char* ssid = "IoT";
-//const char* password = "KdGIoT43!";
+const char* ssid = "IoT";
+const char* password = "KdGIoT70!";
 
-const char* ssid = "ARC";
-const char* password = "1nt3rn3t4rC!";
+//const char* ssid = "Proximus-Home-850113";
+//const char* password = "44a4dxh37e3wpfab";
 
-const int trigPin = 7; // Trigger Pin of Ultrasonic Sensor
-const int echoPin = 21; // Echo Pin of Ultrasonic Sensor
-
-long initialDistance = -1; // Variable to store the first measured distance
-
+//const char* ssid = "ARC";
+//const char* password = "1nt3rn3t4rC!";
 void startCameraServer();
 
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+  pinMode(trigPin, OUTPUT);  // Ultrasonic sensor setup
+  digitalWrite(trigPin, LOW);
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -69,7 +69,7 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_UXGA;
+  config.frame_size = FRAMESIZE_SVGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -84,7 +84,7 @@ void setup() {
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
     // Limit the frame size when PSRAM is not available
-    config.frame_size = FRAMESIZE_SVGA;
+    config.frame_size = FRAMESIZE_HVGA;
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
 
@@ -99,7 +99,7 @@ void setup() {
   // initial sensors are flipped vertically and colors are a bit saturated
   s->set_vflip(s, 1); // flip it back
   s->set_brightness(s, 1); // up the brightness just a bit
-  s->set_saturation(s, 0); // lower the saturation
+  s->set_saturation(s, -1); // lower the saturation
   
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
@@ -116,13 +116,44 @@ void setup() {
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
+}
 
-  pinMode(trigPin, OUTPUT); // Ultrasonic sensor setup
-  digitalWrite(trigPin, LOW);
+void captureAndSendImage() {
+  camera_fb_t * fb = NULL;
+  // Take a picture
+  fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+  }
+
+  // Encode the image data as Base64
+  String imageBase64 = base64::encode(fb->buf, fb->len);
+  Serial.println(imageBase64);
+
+
+  // Send the captured image to Google Apps Script
+  HTTPClient http;
+  http.begin(scriptURL); // Specify the destination URL
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  // Construct the POST body with the image data
+  String postData = "imageData=" + imageBase64;
+  int httpResponseCode = http.POST(postData);
+
+  if (httpResponseCode > 0) {
+    Serial.printf("[HTTP] POST request sent, response code: %d\n", httpResponseCode);
+  } else {
+    Serial.printf("[HTTP] POST request failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
+  }
+
+  // Free the camera frame buffer
+  esp_camera_fb_return(fb);
+  http.end();
 }
 
 void loop() {
-  long duration, inches, cm; // Variables to make the calculation for measured distance.
+  long duration, inches, cm;  // Variables to make the calculation for measured distance.
 
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
@@ -135,12 +166,12 @@ void loop() {
 
   // Check if this is the first measurement
   if (initialDistance == -1) {
-    initialDistance = cm; // Store the first measured distance
+    initialDistance = cm;  // Store the first measured distance
   } else {
     // Compare the current measurement to the initial measurement
     if (cm == initialDistance) {
-      // Trigger a ping if the measurement matches the initial measurement
-      Serial.println("Ping!");
+      // Send local IP address to the Google Apps Script web app
+      captureAndSendImage();
     }
   }
 
@@ -149,8 +180,7 @@ void loop() {
   Serial.print(cm);
   Serial.print(" cm");
   Serial.println();
-  delay(100); // Delay 100ms before next reading.
-  // curl -o captured_photo.jpg "http://172.16.1.175/capture"
+  delay(100);  // Delay 100ms before next reading.
 }
 
 long microsecondsToInches(long microseconds) {
