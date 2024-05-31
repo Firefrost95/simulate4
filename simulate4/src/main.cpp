@@ -6,8 +6,20 @@
 const int trigPin = 7;   // Trigger Pin of Ultrasonic Sensor
 const int echoPin = 21;  // Echo Pin of Ultrasonic Sensor
 long initialDistance = -1;  // Variable to store the first measured distance
-// Define your Google Apps Script endpoint URL
-const char* scriptURL = "https://script.google.com/macros/s/AKfycbzTW6LPc59BaGms6Vi9uFcm0uL2CY_IG5duj4nf_6-2vEoGD9DG4F3BF4DIPVzV8ea9/exec";
+const char* scriptURL = "https://script.google.com/macros/s/AKfycbzKG8zDMVDlKkkMcaCdqOM0VAgnDy19QqJudl_Vgll2Lsjsu1ObeYDHSHvkVnIkD7whXQ/exec";
+
+// WiFi credentials
+struct WiFiCredentials {
+  const char* ssid;
+  const char* password;
+};
+
+WiFiCredentials wifiOptions[] = {
+  {"IoT", "KdGIoT70!"},
+  {"Proximus-Home-850113", "44a4dxh37e3wpfab"},
+  {"ARC", "1nt3rn3t4rC!"},
+  {"", ""}
+};
 
 // ===================
 // Select camera model
@@ -29,23 +41,13 @@ const char* scriptURL = "https://script.google.com/macros/s/AKfycbzTW6LPc59BaGms
 
 #include "camera_pins.h"
 
-// ===========================
-// Enter your WiFi credentials
-// ===========================
-const char* ssid = "IoT";
-const char* password = "KdGIoT70!";
-
-//const char* ssid = "Proximus-Home-850113";
-//const char* password = "44a4dxh37e3wpfab";
-
-//const char* ssid = "ARC";
-//const char* password = "1nt3rn3t4rC!";
 void startCameraServer();
 
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+
   pinMode(trigPin, OUTPUT);  // Ultrasonic sensor setup
   digitalWrite(trigPin, LOW);
 
@@ -69,7 +71,7 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_SVGA;
+  config.frame_size = FRAMESIZE_XGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -97,10 +99,69 @@ void setup() {
 
   sensor_t * s = esp_camera_sensor_get();
   // initial sensors are flipped vertically and colors are a bit saturated
-  s->set_vflip(s, 1); // flip it back
   s->set_brightness(s, 1); // up the brightness just a bit
   s->set_saturation(s, -1); // lower the saturation
   
+  WiFiCredentials selectedCredentials = selectWiFiCredentials();
+  connectToWiFi(selectedCredentials.ssid, selectedCredentials.password);
+
+  startCameraServer();
+
+  Serial.print("Camera Ready! Use 'http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("' to connect");
+}
+
+WiFiCredentials selectWiFiCredentials() {
+  Serial.println("Select WiFi Network:");
+  Serial.println("1: IoT");
+  Serial.println("2: Proximus-Home-850113");
+  Serial.println("3: ARC");
+  Serial.println("4: Enter new WiFi credentials");
+
+  while (!Serial.available()) {
+    delay(100);
+  }
+
+  int choice = Serial.parseInt();
+  Serial.read(); // consume newline
+
+  if (choice >= 1 && choice <= 3) {
+    return wifiOptions[choice - 1];
+  } else if (choice == 4) {
+    return enterNewWiFiCredentials();
+  } else {
+    Serial.println("Invalid choice, defaulting to IoT");
+    return wifiOptions[0];
+  }
+}
+
+WiFiCredentials enterNewWiFiCredentials() {
+  static char newSSID[32];
+  static char newPassword[64];
+
+  Serial.println("Enter SSID:");
+  readSerialInput(newSSID, sizeof(newSSID));
+
+  Serial.println("Enter Password:");
+  readSerialInput(newPassword, sizeof(newPassword));
+
+  return {newSSID, newPassword};
+}
+
+void readSerialInput(char* buffer, int bufferSize) {
+  int index = 0;
+  while (index < bufferSize - 1) {
+    if (Serial.available()) {
+      char c = Serial.read();
+      if (c == '\n') break;
+      buffer[index++] = c;
+    }
+  }
+  buffer[index] = '\0';
+}
+
+void connectToWiFi(const char* ssid, const char* password) {
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
 
@@ -110,12 +171,6 @@ void setup() {
   }
   Serial.println("");
   Serial.println("WiFi connected");
-
-  startCameraServer();
-
-  Serial.print("Camera Ready! Use 'http://");
-  Serial.print(WiFi.localIP());
-  Serial.println("' to connect");
 }
 
 void captureAndSendImage() {
@@ -129,8 +184,7 @@ void captureAndSendImage() {
 
   // Encode the image data as Base64
   String imageBase64 = base64::encode(fb->buf, fb->len);
-  Serial.println(imageBase64);
-
+  imageBase64 = urlEncodeBase64(imageBase64); // Encode special characters
 
   // Send the captured image to Google Apps Script
   HTTPClient http;
@@ -143,6 +197,12 @@ void captureAndSendImage() {
 
   if (httpResponseCode > 0) {
     Serial.printf("[HTTP] POST request sent, response code: %d\n", httpResponseCode);
+    // If the response code is 200, read the response body
+    if (httpResponseCode == 200) {
+      String response = http.getString();
+      Serial.println("Response from Google Apps Script:");
+      Serial.println(response);
+    }
   } else {
     Serial.printf("[HTTP] POST request failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
@@ -150,6 +210,12 @@ void captureAndSendImage() {
   // Free the camera frame buffer
   esp_camera_fb_return(fb);
   http.end();
+}
+
+String urlEncodeBase64(String base64) {
+  base64.replace("+", "%2B");
+  base64.replace("/", "%2F");
+  return base64;
 }
 
 void loop() {
@@ -170,8 +236,8 @@ void loop() {
   } else {
     // Compare the current measurement to the initial measurement
     if (cm == initialDistance) {
-      // Send local IP address to the Google Apps Script web app
       captureAndSendImage();
+      delay(1000);
     }
   }
 
