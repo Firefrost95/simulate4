@@ -1,0 +1,90 @@
+function doPost(e) {
+  var imageData = e.parameter.imageData;
+ 
+  // Get current timestamp
+  var currentTime = new Date().getTime();
+ 
+  // Retrieve the properties
+  var userProperties = PropertiesService.getUserProperties();
+  var lastUploadTime = userProperties.getProperty('lastUploadTime');
+  var currentFolderId = userProperties.getProperty('currentFolderId'); // Retrieve the current folder ID
+ 
+  // Check if 30 minutes have passed since the last upload
+  if (!lastUploadTime || (currentTime - lastUploadTime) > 1800000) {
+    // 30 minutes have passed or first time setup, send an email and create a new folder
+    if (currentFolderId) {
+      sendEmailWithFolderLink(currentFolderId);
+    }
+    currentFolderId = createNewFolder().getId(); // Create a new folder and get its ID
+    userProperties.setProperty('currentFolderId', currentFolderId); // Save the new folder ID
+  }
+ 
+  // Decode the Base64 image data
+  var decodedImage = Utilities.base64Decode(imageData);
+ 
+  // Create a new file in the current folder
+  var folder = DriveApp.getFolderById(currentFolderId);
+  var blob = Utilities.newBlob(decodedImage, 'image/jpeg');
+  var fileName = 'Image_' + currentTime + '.jpg'; // Generate a unique file name
+  blob.setName(fileName); // Ensure the blob has a name
+  var file = folder.createFile(blob);
+ 
+  // Update the properties with the current time
+  userProperties.setProperty('lastUploadTime', currentTime);
+ 
+  // Prepare the response object
+  var response = {
+    "result": "success",
+    "fileName": fileName,
+    "folderId": currentFolderId,
+    "logs": [
+      "Received parameters: " + JSON.stringify(e.parameter),
+      "Folder ID: " + currentFolderId,
+      "Folder retrieved: " + (folder !== null),
+      "Decoded image data length: " + decodedImage.length,
+      "File created: " + (file !== null),
+      "File name: " + fileName
+    ]
+  };
+ 
+  // Return the response with logs
+  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+}
+ 
+function createNewFolder() {
+  var parentFolderId = '1FO7EHk7nPQcSkxfToioYcqmuufmD70P1'; // Your Google Drive parent folder ID
+  var parentFolder = DriveApp.getFolderById(parentFolderId);
+  var newFolder = parentFolder.createFolder('Folder_' + new Date().getTime());
+  return newFolder;
+}
+ 
+function sendEmailWithFolderLink(folderId) {
+  var folder = DriveApp.getFolderById(folderId);
+  var emailAddress = 'jonassambaer@outlook.com';
+  var subject = 'New Image Folder Created';
+  var body = 'A new folder has been created and contains images. You can view it here: ' + folder.getUrl();
+ 
+  MailApp.sendEmail(emailAddress, subject, body);
+}
+ 
+function createTrigger() {
+  ScriptApp.newTrigger('checkForPause')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+}
+ 
+function checkForPause() {
+  var userProperties = PropertiesService.getUserProperties();
+  var lastUploadTime = userProperties.getProperty('lastUploadTime');
+  var currentFolderId = userProperties.getProperty('currentFolderId');
+  var currentTime = new Date().getTime();
+ 
+  if (lastUploadTime && (currentTime - lastUploadTime) > 1800000) {
+    // 30 minutes have passed, send an email
+    sendEmailWithFolderLink(currentFolderId);
+    // Clear the current folder ID
+    currentFolderId = createNewFolder().getId(); // Create a new folder and get its ID
+    userProperties.setProperty('currentFolderId', currentFolderId); // Save the new folder ID
+  }
+}
