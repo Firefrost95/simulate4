@@ -2,24 +2,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <base64.h>
+#include "secret.h"
 
 const int trigPin = 7;   // Trigger Pin of Ultrasonic Sensor
 const int echoPin = 21;  // Echo Pin of Ultrasonic Sensor
 long initialDistance = -1;  // Variable to store the first measured distance
-const char* scriptURL = "https://script.google.com/macros/s/AKfycbzKG8zDMVDlKkkMcaCdqOM0VAgnDy19QqJudl_Vgll2Lsjsu1ObeYDHSHvkVnIkD7whXQ/exec";
 
-// WiFi credentials
-struct WiFiCredentials {
-  const char* ssid;
-  const char* password;
-};
-
-WiFiCredentials wifiOptions[] = {
-  {"IoT", "KdGIoT70!"},
-  {"Proximus-Home-850113", "44a4dxh37e3wpfab"},
-  {"ARC", "1nt3rn3t4rC!"},
-  {"", ""}
-};
 
 // ===================
 // Select camera model
